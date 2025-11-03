@@ -109,39 +109,31 @@ async function convertToTiff() {
     try {
         showProgress();
         updateProgress(10, 'Initializing conversion...');
-        
+
         // Check if we have the required files
         const hasHdr = uploadedFiles.some(f => f.name.toLowerCase() === 'hdr.adf');
         if (!hasHdr) {
             throw new Error('Missing hdr.adf file. Please upload all ADF files from your dataset.');
         }
-        
-        updateProgress(30, 'Processing ADF files...');
-        
-        // Since we can't use GDAL directly in the browser without complex setup,
-        // we'll use a web service or implement a basic converter
-        // For GitHub Pages hosting, we'll need to use a client-side solution
-        
-        // Option 1: Use a public API service (if available)
-        // Option 2: Use WebAssembly GDAL (requires additional setup)
-        // Option 3: Implement basic ADF reader in JavaScript
-        
-        // For now, we'll implement a basic solution that works with the browser's capabilities
+
+        updateProgress(20, 'Loading GDAL library...');
+
+        // Use GDAL-based converter for proper GeoTIFF creation
         const tiffBlob = await processAdfFiles(uploadedFiles);
-        
+
         updateProgress(90, 'Finalizing conversion...');
-        
+
         convertedBlob = tiffBlob;
         downloadBtn.href = URL.createObjectURL(convertedBlob);
         downloadBtn.download = 'converted_' + Date.now() + '.tiff';
-        
+
         updateProgress(100, 'Conversion complete!');
-        
+
         setTimeout(() => {
             hideProgress();
             showDownload();
         }, 1000);
-        
+
     } catch (error) {
         console.error('Conversion error:', error);
         showError('Error converting file: ' + error.message);
@@ -149,44 +141,52 @@ async function convertToTiff() {
     }
 }
 
-// Process ADF files (basic implementation)
+// Process ADF files using GDAL for proper GeoTIFF creation
 async function processAdfFiles(files) {
-    // This is a simplified implementation
-    // For a production system, you would need to:
-    // 1. Parse the ADF binary format properly
-    // 2. Extract georeferencing information
-    // 3. Convert raster data to TIFF format
-    // 4. Preserve spatial reference information
-    
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        
-        // Find the main data file
-        const hdrFile = files.find(f => f.name.toLowerCase() === 'hdr.adf');
-        
-        if (!hdrFile) {
-            reject(new Error('HDR file not found'));
-            return;
+    try {
+        updateProgress(30, 'Initializing GDAL converter...');
+
+        // Try GDAL-based conversion first (produces proper GeoTIFF)
+        const converter = new window.AdfToTiffConverter();
+
+        updateProgress(40, 'Loading GDAL library...');
+        await converter.initializeGdal();
+
+        updateProgress(50, 'Reading ADF files...');
+        updateProgress(60, 'Extracting spatial reference...');
+        updateProgress(70, 'Converting to GeoTIFF format...');
+
+        const tiffBlob = await converter.convertAdfToTiff(files);
+
+        updateProgress(85, 'Applying compression and optimization...');
+
+        return tiffBlob;
+
+    } catch (gdalError) {
+        console.warn('GDAL conversion failed, trying fallback method:', gdalError);
+
+        // Fallback: Use SimpleAdfReader if GDAL fails
+        try {
+            updateProgress(50, 'Using fallback converter...');
+
+            const simpleReader = new window.SimpleAdfReader();
+            const tiffBlob = await simpleReader.parseAdfFiles(files);
+
+            // Show warning that this may not preserve all spatial information
+            console.warn('Using simplified converter - spatial reference may not be fully preserved');
+
+            return tiffBlob;
+
+        } catch (fallbackError) {
+            // If both methods fail, provide detailed error
+            throw new Error(
+                'Failed to convert ADF to TIFF. ' +
+                'GDAL error: ' + gdalError.message + '. ' +
+                'Fallback error: ' + fallbackError.message + '. ' +
+                'Please ensure you have uploaded all ADF files from the dataset.'
+            );
         }
-        
-        reader.onload = function(e) {
-            try {
-                // Create a basic TIFF structure
-                // Note: This is a placeholder - real implementation would need proper TIFF encoding
-                const arrayBuffer = e.target.result;
-                
-                // Create a simple TIFF blob (this would need proper TIFF formatting)
-                const blob = new Blob([arrayBuffer], { type: 'image/tiff' });
-                resolve(blob);
-                
-            } catch (error) {
-                reject(error);
-            }
-        };
-        
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.readAsArrayBuffer(hdrFile);
-    });
+    }
 }
 
 // UI Helper functions
