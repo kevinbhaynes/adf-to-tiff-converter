@@ -1,6 +1,33 @@
-# ADF to TIFF Converter
+# ADF to GeoTIFF Converter
 
-A web-based geoprocessing tool that converts ESRI ArcInfo Binary Grid (.adf) files to GeoTIFF format. This tool runs entirely in the browser and can be hosted on GitHub Pages.
+Convert ESRI ArcInfo Binary Grid (.adf) files to GeoTIFF format. Available as both a **Python script** (recommended) and a web-based tool.
+
+## 🎯 Choose Your Method
+
+### **Python Script (Recommended)** ⭐
+
+**Best for:** Reliability, large files, offline use, guaranteed ArcGIS Pro compatibility
+
+- ✅ Uses native GDAL library (industry standard)
+- ✅ Works with any file size
+- ✅ Better error messages
+- ✅ Faster processing
+- ✅ Works offline
+- ✅ 100% ArcGIS Pro compatible
+
+**👉 [See Python Setup Guide](PYTHON_SETUP.md)**
+
+### **Web-Based Tool** 🌐
+
+**Best for:** Quick conversions, no installation needed
+
+- ⚠️ May have browser limitations
+- ⚠️ Requires internet connection
+- ⚠️ File size limits
+
+**👉 [Use Web Tool](https://[your-username].github.io/adf-to-tiff-converter/)**
+
+---
 
 ## 🚀 Live Demo
 
