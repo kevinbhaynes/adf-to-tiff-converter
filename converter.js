@@ -3,169 +3,145 @@
 
 class AdfToTiffConverter {
     constructor() {
+        this.Gdal = null;
         this.gdalReady = false;
-        this.initializeGdal();
     }
 
     async initializeGdal() {
-        // Load GDAL.js library
-        if (typeof Gdal === 'undefined') {
+        if (this.gdalReady && this.Gdal) {
+            return this.Gdal;
+        }
+
+        // Load GDAL.js library if not already loaded
+        if (typeof window.initGdalJs === 'undefined') {
             await this.loadGdalScript();
         }
+
+        console.log('Initializing GDAL.js...');
+
+        // Initialize GDAL with proper configuration
+        this.Gdal = await window.initGdalJs({
+            path: 'https://cdn.jsdelivr.net/npm/gdal3.js@2.8.1/dist/package',
+            useWorker: false
+        });
+
         this.gdalReady = true;
+        console.log('GDAL.js initialized successfully');
+        console.log('Available raster drivers:', Object.keys(this.Gdal.drivers.raster).length);
+
+        return this.Gdal;
     }
 
     async loadGdalScript() {
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/gdal3.js@2.5.0/dist/package/gdal3.js';
-            script.onload = resolve;
-            script.onerror = reject;
+            script.src = 'https://cdn.jsdelivr.net/npm/gdal3.js@2.8.1/dist/package/gdal3.js';
+            script.onload = () => {
+                console.log('GDAL.js script loaded');
+                resolve();
+            };
+            script.onerror = () => {
+                console.error('Failed to load GDAL.js script');
+                reject(new Error('Failed to load GDAL.js from CDN'));
+            };
             document.head.appendChild(script);
         });
     }
 
     async convertAdfToTiff(files) {
-        if (!this.gdalReady) {
-            await this.initializeGdal();
-        }
+        try {
+            // Initialize GDAL
+            const Gdal = await this.initializeGdal();
 
-        return new Promise(async (resolve, reject) => {
-            try {
-                // Check if GDAL is available
-                if (typeof window.Gdal === 'undefined') {
-                    throw new Error('GDAL library not loaded. Please check your internet connection.');
-                }
-
-                // Initialize GDAL
-                const Gdal = window.Gdal;
-                const gdal = await Gdal();
-
-                // Create virtual file system
-                const FS = gdal.FS;
-
-                // Create directory for ADF files
-                const dirPath = '/adf_data';
-                try {
-                    FS.mkdir(dirPath);
-                } catch (e) {
-                    // Directory might already exist
-                    console.warn('Directory already exists or cannot be created:', e);
-                }
-
-                // Write all ADF files to virtual file system
-                for (const file of files) {
-                    const arrayBuffer = await this.fileToArrayBuffer(file);
-                    const uint8Array = new Uint8Array(arrayBuffer);
-                    FS.writeFile(`${dirPath}/${file.name}`, uint8Array);
-                }
-
-                // Open the ADF dataset (pass the directory, not a specific file)
-                const dataset = gdal.open(dirPath);
-
-                if (!dataset) {
-                    throw new Error('Failed to open ADF dataset. The files may be corrupted or incomplete.');
-                }
-
-                // Get dataset information
-                const width = dataset.rasterXSize;
-                const height = dataset.rasterYSize;
-                const bandCount = dataset.rasterCount;
-
-                console.log(`Dataset info: ${width}x${height}, ${bandCount} bands`);
-
-                // Get spatial reference information
-                const projection = dataset.getProjection();
-                const geoTransform = dataset.getGeoTransform();
-
-                console.log('Projection:', projection);
-                console.log('GeoTransform:', geoTransform);
-
-                // Create output TIFF
-                const driver = gdal.getDriverByName('GTiff');
-                const outputPath = '/output.tiff';
-
-                // GeoTIFF creation options for maximum compatibility
-                const createOptions = [
-                    'COMPRESS=LZW',           // LZW compression (widely supported)
-                    'TILED=YES',              // Tiled format for better performance
-                    'BIGTIFF=IF_NEEDED',      // Support large files
-                    'PROFILE=GeoTIFF'         // Ensure proper GeoTIFF tags
-                ];
-
-                const outputDataset = driver.create(
-                    outputPath,
-                    width,
-                    height,
-                    bandCount,
-                    gdal.GDT_Float32,
-                    createOptions
-                );
-
-                if (!outputDataset) {
-                    throw new Error('Failed to create output TIFF file');
-                }
-
-                // Set spatial reference (this is critical for GeoTIFF)
-                outputDataset.setProjection(projection);
-                outputDataset.setGeoTransform(geoTransform);
-
-                // Copy raster data band by band
-                for (let i = 1; i <= bandCount; i++) {
-                    console.log(`Processing band ${i} of ${bandCount}`);
-
-                    const band = dataset.getRasterBand(i);
-                    const outputBand = outputDataset.getRasterBand(i);
-
-                    // Read data
-                    const data = new Float32Array(width * height);
-                    band.read(0, 0, width, height, data, width, height);
-
-                    // Write to output
-                    outputBand.write(0, 0, width, height, data, width, height);
-
-                    // Copy band metadata
-                    const noDataValue = band.getNoDataValue();
-                    if (noDataValue !== null && noDataValue !== undefined) {
-                        outputBand.setNoDataValue(noDataValue);
-                        console.log(`Set NoData value: ${noDataValue}`);
-                    }
-                }
-
-                // Flush and close datasets to ensure all data is written
-                outputDataset.close();
-                dataset.close();
-
-                console.log('Reading output file...');
-
-                // Read the output file
-                const outputData = FS.readFile(outputPath);
-                const blob = new Blob([outputData], { type: 'image/tiff' });
-
-                console.log(`Created GeoTIFF: ${blob.size} bytes`);
-
-                // Cleanup virtual file system
-                try {
-                    // Remove all files in directory
-                    const dirContents = FS.readdir(dirPath);
-                    for (const file of dirContents) {
-                        if (file !== '.' && file !== '..') {
-                            FS.unlink(`${dirPath}/${file}`);
-                        }
-                    }
-                    FS.rmdir(dirPath);
-                    FS.unlink(outputPath);
-                } catch (cleanupError) {
-                    console.warn('Cleanup error (non-critical):', cleanupError);
-                }
-
-                resolve(blob);
-
-            } catch (error) {
-                console.error('GDAL conversion error:', error);
-                reject(new Error(`GDAL conversion failed: ${error.message}`));
+            if (!Gdal) {
+                throw new Error('GDAL library not loaded. Please check your internet connection.');
             }
-        });
+
+            console.log('Starting ADF to GeoTIFF conversion...');
+            console.log(`Processing ${files.length} files`);
+
+            // Create directory for ADF files in virtual file system
+            const dirPath = '/adf_data';
+            const outputPath = '/output.tif';
+
+            // Write all ADF files to GDAL's virtual file system
+            const fileBuffers = [];
+            for (const file of files) {
+                const arrayBuffer = await this.fileToArrayBuffer(file);
+                const uint8Array = new Uint8Array(arrayBuffer);
+
+                // GDAL expects files in a specific format
+                fileBuffers.push({
+                    name: `${dirPath}/${file.name}`,
+                    data: uint8Array
+                });
+
+                console.log(`Loaded ${file.name}: ${uint8Array.length} bytes`);
+            }
+
+            // Open the ADF dataset
+            // Pass the directory path to open the ADF grid
+            console.log('Opening ADF dataset...');
+            const result = await Gdal.open([dirPath], fileBuffers);
+
+            if (!result || !result.datasets || result.datasets.length === 0) {
+                throw new Error('Failed to open ADF dataset. Please ensure all ADF files are uploaded.');
+            }
+
+            const dataset = result.datasets[0];
+            console.log('ADF dataset opened successfully');
+
+            // Get dataset information
+            const info = await Gdal.getInfo(dataset);
+            console.log('Dataset info:', info);
+
+            // Use gdal_translate to convert ADF to GeoTIFF with proper options
+            console.log('Converting to GeoTIFF...');
+
+            const translateOptions = [
+                '-of', 'GTiff',                    // Output format: GeoTIFF
+                '-co', 'COMPRESS=LZW',             // LZW compression
+                '-co', 'TILED=YES',                // Tiled for performance
+                '-co', 'BIGTIFF=IF_NEEDED',        // Support large files
+                outputPath                          // Output file path
+            ];
+
+            // Perform the conversion
+            const translatedDataset = await Gdal.translate(dataset, translateOptions);
+
+            if (!translatedDataset) {
+                throw new Error('Translation failed');
+            }
+
+            console.log('Translation successful, retrieving output file...');
+
+            // Get the output file bytes
+            const outputBytes = await Gdal.getFileBytes(outputPath);
+
+            if (!outputBytes || outputBytes.length === 0) {
+                throw new Error('Output file is empty');
+            }
+
+            console.log(`Created GeoTIFF: ${outputBytes.length} bytes`);
+
+            // Create blob from the output bytes
+            const blob = new Blob([outputBytes], { type: 'image/tiff' });
+
+            // Cleanup
+            try {
+                await Gdal.close(translatedDataset);
+                await Gdal.close(dataset);
+            } catch (cleanupError) {
+                console.warn('Cleanup error (non-critical):', cleanupError);
+            }
+
+            return blob;
+
+        } catch (error) {
+            console.error('GDAL conversion error:', error);
+            console.error('Error stack:', error.stack);
+            throw new Error(`GDAL conversion failed: ${error.message}`);
+        }
     }
 
     fileToArrayBuffer(file) {
